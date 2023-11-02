@@ -1,7 +1,7 @@
 using DataFrames
 using CSV
 using ProgressMeter
-using  Dates
+using Dates
 using Statistics
 using Distributions
 
@@ -13,15 +13,13 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
 
   if eltype(dataset.timestamp) != DateTime
    dataset.timestamp = first.(dataset.timestamp,19)
-   # 使用 transform! 对数据框的列进行操作
    transform!(dataset, :timestamp => ByRow(x -> DateTime(x, dateformat"yyyy-mm-dd HH:MM:SS"))=> :timestamp) 
   end
   dataset
   # initialize the local variables
   tbv =  vbs = bucket = nothing
-  #estimatevpin = new("estimate.vpin")
   
-  #先将数据按一定时间间隔分组
+  #将数据按一定时间间隔分组
   time_interval = Dates.Second(timebarsize)  
   start_time = minimum(dataset.timestamp)
   end_time = maximum(dataset.timestamp)+time_interval
@@ -46,9 +44,9 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
      dp = last(x) - first(x)
      return dp
   end
-  #minutebars诞生
+
   minutebars = combine(groupby(dataset,:interval),:price => diff =>:dp ,:volume => sum =>:tbv)
-  dropmissing!(minutebars) #删除包含缺失值的行
+  dropmissing!(minutebars) 
   minutebars.id = 1:nrow(minutebars)
   
   sdp = std(minutebars.dp)
@@ -57,13 +55,8 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
   totvol = sum(minutebars.tbv)
   vbs = (totvol / ndays) / buckets
   
-  #params = (tbSize = timebarsize, buckets = buckets, samplength = samplength, VBS = vbs, ndays = ndays)
-  #estimatevpin@parameters = params
-  
-  #处理那些timebar中volume大于volume bucket size，即tbv>vbs的情况
   x = 10
   threshold = (1 - 1 / x) * vbs
-  #largebars诞生
   largebars = filter( row -> row.tbv > threshold, minutebars)
   
   if nrow(largebars) != 0
@@ -100,8 +93,8 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
   xtrarows = combine(groupby(filter( row -> row.bucket != 1, minutebars), :bucket), first)
   xtrarnum  = findall(row -> row.id in xtrarows.id, eachrow(minutebars))
   
-  minutebars[xtrarnum, :tbv] .= minutebars[xtrarnum, :exvol]  #这一个timebar中补完上一个buckets剩余的加入这一个buckets的volume量
-  xtrarows.tbv = xtrarows.tbv - xtrarows.exvol  #这一个timebar往上一个buckets中补的volume量
+  minutebars[xtrarnum, :tbv] .= minutebars[xtrarnum, :exvol]  
+  xtrarows.tbv = xtrarows.tbv - xtrarows.exvol  
   xtrarows.bucket = xtrarows.bucket .- 1
   
   xtrarows = xtrarows[!, ["interval", "dp", "tbv","id", "runvol", "bucket", "exvol"]]
@@ -116,15 +109,12 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
   minutebars.zb = cdf(d, minutebars.dp ./ sdp)
   minutebars.zs = 1 .- cdf(d, minutebars.dp ./ sdp)
   d = nothing
-  # Calculate Buy Volume (bvol) and Sell volume (svol) by multiplying timebar's
-  # volume (tbv) by the corresponding probabilities zb and zs.
   
   minutebars.bvol = minutebars.tbv .* minutebars.zb
   minutebars.svol = minutebars.tbv .* minutebars.zs
   
   minutebars = minutebars[minutebars.tbv .> 0, :]
   
-  #将每个bucket聚合起来 计算VtaoS=agg.svol和VtaoB=agg.bvol
   bucketdata = combine(groupby(minutebars, :bucket), :bvol => sum => :agg_bvol, :svol => sum => :agg_svol)
   bucketdata.aoi = abs.(bucketdata.agg_bvol .- bucketdata.agg_svol)
   
@@ -140,7 +130,6 @@ function calcu_vpin(timebarsize, buckets, samplength, dataset)
   
   bucketdata.vpin = (bucketdata.cumoi - bucketdata.lagcumoi) /  (samplength * vbs)
   bucketdata.vpin[samplength] = bucketdata.cumoi[samplength] /  (samplength * vbs)
-  #bucketdata.duration = as.numeric(  difftime(bucketdata$endtime, bucketdata$starttime, units = "secs"))
   
   vpin=bucketdata.vpin[samplength:nrow(bucketdata)]
   describe(vpin)
